@@ -88,7 +88,7 @@ export async function updateUsageRecord(
       ...(input.downloadGb !== undefined && {
         downloadGb: new Prisma.Decimal(input.downloadGb),
       }),
-      ...(input.provider !== undefined && { provider: input.provider }),
+      ...(input.provider !== undefined && { provider: input.provider ?? "" }),
       ...(input.notes !== undefined && { notes: input.notes }),
     },
   });
