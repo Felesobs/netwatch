@@ -12,9 +12,9 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
-  projects: [
+projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile-safari", use: { ...devices["iPhone 14"] } },
+    { name: "mobile-chrome", use: { ...devices["Pixel 7"] } },
   ],
   webServer: process.env.CI
     ? {
