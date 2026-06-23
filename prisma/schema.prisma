@@ -1,0 +1,143 @@
+// NetWatch — Prisma schema
+//
+// Design notes:
+// - All bandwidth quantities are stored in GB as `Decimal(12,4)` to avoid
+//   floating point drift across millions of incremental writes, while still
+//   supporting fractional GB (e.g. 0.0512 GB for a single small sync).
+// - Dates for usage records are stored as `@db.Date` (no time component)
+//   because usage is tracked at daily granularity; `createdAt`/`updatedAt`
+//   retain full timestamps for auditing.
+// - `MonthlySummary` is a derived/materialized table, recomputed whenever a
+//   `UsageRecord` in its period is created, updated, or deleted. This keeps
+//   dashboard reads O(1) instead of aggregating raw records on every page
+//   load. The recompute happens inside `src/services/summary.service.ts`.
+// - Every user-owned table carries `userId` with a composite index to keep
+//   per-user queries (which dominate this app's access pattern) index-only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  usageRecords    UsageRecord[]
+  monthlySummaries MonthlySummary[]
+  alerts          Alert[]
+  settings        Settings?
+
+  @@map("users")
+}
+
+model UsageRecord {
+  id         String   @id @default(cuid())
+  userId     String
+  date       DateTime @db.Date
+  uploadGb   Decimal  @db.Decimal(12, 4)
+  downloadGb Decimal  @db.Decimal(12, 4)
+  /// Empty string means "no provider". NOT NULL avoids PostgreSQL's
+  /// NULL != NULL unique-constraint behaviour, which allowed duplicate
+  /// (userId, date, NULL) rows to be inserted silently.
+  provider   String   @default("")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, provider])
+  @@index([userId, date])
+  @@map("usage_records")
+}
+
+model MonthlySummary {
+  id               String   @id @default(cuid())
+  userId           String
+  periodStart      DateTime @db.Date
+  periodEnd        DateTime @db.Date
+  totalUploadGb    Decimal  @db.Decimal(14, 4)
+  totalDownloadGb  Decimal  @db.Decimal(14, 4)
+  totalGb          Decimal  @db.Decimal(14, 4)
+  quotaGb          Decimal? @db.Decimal(12, 4)
+  daysElapsed      Int
+  daysRemaining    Int
+  dailyAverageGb   Decimal  @db.Decimal(12, 4)
+  predictedTotalGb Decimal  @db.Decimal(14, 4)
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodStart])
+  @@index([userId, periodStart])
+  @@map("monthly_summaries")
+}
+
+enum AlertChannel {
+  BROWSER
+  IN_APP
+}
+
+enum AlertStatus {
+  PENDING
+  TRIGGERED
+  DISMISSED
+}
+
+model Alert {
+  id          String       @id @default(cuid())
+  userId      String
+  threshold   Int
+  channel     AlertChannel
+  status      AlertStatus  @default(PENDING)
+  periodStart DateTime     @db.Date
+  message     String
+  createdAt   DateTime     @default(now())
+  triggeredAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // A given threshold can only fire once per billing period per channel.
+  @@unique([userId, periodStart, threshold, channel])
+  @@index([userId, status])
+  @@map("alerts")
+}
+
+enum UsageUnit {
+  MB
+  GB
+  TB
+}
+
+enum ThemePreference {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+model Settings {
+  id                   String          @id @default(cuid())
+  userId               String          @unique
+  billingCycleDay      Int             @default(1)
+  usageUnit            UsageUnit       @default(GB)
+  quotaGb              Decimal?        @db.Decimal(12, 4)
+  theme                ThemePreference @default(SYSTEM)
+  browserNotifications Boolean         @default(true)
+  inAppNotifications   Boolean         @default(true)
+  notifyThresholds     Int[]           @default([50, 80, 90, 100])
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("settings")
+}
