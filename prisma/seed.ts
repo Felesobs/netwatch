@@ -3,9 +3,17 @@
  * Run with: npm run db:seed
  */
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+function createPrismaClient() {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const adapter = new PrismaPg(pool);
+  return new PrismaClient({ adapter });
+}
+
+const prisma = createPrismaClient();
 
 const DEMO_EMAIL = "demo@netwatch.app";
 const DEMO_PASSWORD = "demo12345";
